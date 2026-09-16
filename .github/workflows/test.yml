@@ -1,0 +1,106 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Every manifest is valid JSON
+        run: |
+          for f in .claude-plugin/marketplace.json .agents/plugins/marketplace.json \
+                   plugins/claude-code/.claude-plugin/plugin.json plugins/claude-code/.mcp.json \
+                   plugins/codex/plugin.json plugins/codex/mcp.json; do
+            python3 -c "import json,sys; json.load(open('$f'))" \
+              || { echo "::error::$f is not valid JSON"; exit 1; }
+          done
+
+      # skills/ is the source and each plugin holds a copy, because a plugin
+      # manifest cannot reference a path outside its own root.
+      - name: Skills are in sync
+        run: scripts/sync-skills.sh --check
+
+      # An unset ${VAR} reaches the server as the literal string, so a server
+      # that only checks for presence starts with a bogus key and fails every
+      # call with a 401. ${VAR:-} is the difference between a confusing failure
+      # and a clear one.
+      - name: Claude Code MCP env uses defaulted interpolation
+        run: |
+          python3 - <<'PY'
+          import json, re, sys
+          cfg = json.load(open('plugins/claude-code/.mcp.json'))
+          bad = [f"{s}.{k}={v}"
+                 for s, srv in cfg.items()
+                 for k, v in (srv.get('env') or {}).items()
+                 if re.fullmatch(r'\$\{[A-Za-z_][A-Za-z0-9_]*\}', v)]
+          if bad:
+              print("::error::use ${VAR:-} not ${VAR}: " + ", ".join(bad)); sys.exit(1)
+          PY
+
+      # Codex validates command as a bare executable token and silently drops
+      # the whole server if it is anything else — no error, it just never
+      # appears in `codex mcp list`.
+      - name: Codex MCP command is a bare executable
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          servers = json.load(open('plugins/codex/mcp.json'))['mcpServers']
+          bad = [n for n, s in servers.items()
+                 if s.get('type') == 'stdio' and ('/' in s['command'] or '$' in s['command'])]
+          if bad:
+              print("::error::Codex drops servers whose command is not a bare "
+                    "executable: " + ", ".join(bad)); sys.exit(1)
+          PY
+
+      - name: The pinned MCP server version exists on npm
+        run: |
+          python3 - > /tmp/spec.txt <<'PY'
+          import json
+          print(json.load(open('plugins/codex/mcp.json'))['mcpServers']['gitloom']['args'][1])
+          PY
+          spec=$(cat /tmp/spec.txt)
+          npm view "$spec" version >/dev/null \
+            || { echo "::error::$spec is not on npm"; exit 1; }
+          echo "$spec resolves"
+
+      - name: Both plugins pin the same server version
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          cc = json.load(open('plugins/claude-code/.mcp.json'))['gitloom']['args'][1]
+          cx = json.load(open('plugins/codex/mcp.json'))['mcpServers']['gitloom']['args'][1]
+          if cc != cx:
+              print(f"::error::claude-code pins {cc}, codex pins {cx}"); sys.exit(1)
+          PY
+
+      - name: Claude Code accepts the plugin and the marketplace
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude plugin validate ./plugins/claude-code --strict
+          claude plugin validate .
+
+      - name: Codex installs the plugin from this marketplace
+        env:
+          CODEX_HOME: /tmp/codexhome
+        run: |
+          npm install -g @openai/codex
+          codex plugin marketplace add "$PWD"
+          codex plugin add gitloom@gitloom
+          codex mcp list | grep -q gitloom \
+            || { echo "::error::Codex did not register the plugin's MCP server"; exit 1; }

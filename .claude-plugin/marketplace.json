@@ -1,0 +1,27 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "gitloom",
+  "description": "GitLoom — long-term memory for coding agents, stored as markdown in a git repository",
+  "owner": {
+    "name": "GitLoom",
+    "url": "https://gitloom.cloud"
+  },
+  "plugins": [
+    {
+      "name": "gitloom",
+      "source": "./plugins/claude-code",
+      "displayName": "GitLoom",
+      "description": "Long-term memory backed by a real git repository. Claude recalls what it learned about you in earlier sessions, saves durable facts as they come up, and follows procedures you have taught it.",
+      "version": "0.1.0",
+      "author": {
+        "name": "GitLoom",
+        "url": "https://gitloom.cloud"
+      },
+      "homepage": "https://docs.gitloom.cloud",
+      "repository": "https://github.com/GitLoomHQ/gitloom-plugins",
+      "license": "MIT",
+      "category": "productivity",
+      "keywords": ["memory", "recall", "context", "git", "personalization"]
+    }
+  ]
+}
