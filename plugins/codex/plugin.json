@@ -10,26 +10,35 @@
   "homepage": "https://docs.gitloom.cloud",
   "repository": "https://github.com/GitLoomHQ/gitloom-plugins",
   "license": "MIT",
-  "keywords": ["memory", "recall", "context", "git", "personalization"],
+  "keywords": [
+    "memory",
+    "recall",
+    "context",
+    "git",
+    "personalization"
+  ],
   "extensions": {
     "com.openai": {
       "interface": {
         "displayName": "GitLoom",
         "shortDescription": "Long-term memory, stored as markdown in a git repository",
-        "longDescription": "GitLoom remembers what you tell it across sessions and gives it back when a later question needs it. Memories are markdown in a real git repository, so every one carries its history and what changed it. The plugin adds three tools — recall what is known, save a durable fact, look up a procedure you taught — plus skills for teaching vocabulary and procedures, saving a whole conversation for extraction, and filtered retrieval.",
+        "longDescription": "GitLoom remembers what you tell it across sessions and gives it back when a later question needs it. Memories are markdown in a real git repository, so every one carries its history and what changed it. The plugin adds three tools \u2014 recall what is known, save a durable fact, look up a procedure you taught \u2014 plus skills for teaching vocabulary and procedures, saving a whole conversation for extraction, and filtered retrieval.",
         "developerName": "GitLoom",
         "category": "Productivity",
-        "capabilities": ["Read", "Write"],
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
         "websiteURL": "https://gitloom.cloud",
-        "privacyPolicyURL": "https://gitloom.cloud/privacy",
-        "termsOfServiceURL": "https://gitloom.cloud/terms",
         "defaultPrompt": [
           "What do you already know about me?",
           "Remember that I moved to Pune in September.",
           "Save this conversation to my memory.",
           "How do I ship a release? Check if I have taught you."
         ],
-        "brandColor": "#8B2635"
+        "brandColor": "#8B2635",
+        "composerIcon": "./assets/icon.png",
+        "logo": "./assets/logo.png"
       }
     }
   }
