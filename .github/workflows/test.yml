@@ -100,6 +100,7 @@ jobs:
           CODEX_HOME: /tmp/codexhome
         run: |
           npm install -g @openai/codex
+          mkdir -p "$CODEX_HOME"   # the CLI refuses to start if it does not exist
           codex plugin marketplace add "$PWD"
           codex plugin add gitloom@gitloom
           codex mcp list | grep -q gitloom \
