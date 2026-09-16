@@ -26,15 +26,50 @@ jobs:
         run: |
           for f in .claude-plugin/marketplace.json .agents/plugins/marketplace.json \
                    plugins/claude-code/.claude-plugin/plugin.json plugins/claude-code/.mcp.json \
-                   plugins/codex/plugin.json plugins/codex/mcp.json; do
+                   plugins/codex/.codex-plugin/plugin.json plugins/codex/mcp.json \
+                   hooks/hooks.json; do
             python3 -c "import json,sys; json.load(open('$f'))" \
               || { echo "::error::$f is not valid JSON"; exit 1; }
           done
 
-      # skills/ is the source and each plugin holds a copy, because a plugin
-      # manifest cannot reference a path outside its own root.
-      - name: Skills are in sync
+      # skills/ and hooks/ are the source and each plugin holds a copy, because
+      # a plugin manifest cannot reference a path outside its own root.
+      - name: Skills and hooks are in sync
         run: scripts/sync-skills.sh --check
+
+      - name: Hooks parse
+        run: for f in hooks/*.js hooks/lib/*.js; do node --check "$f"; done
+
+      - name: Hook behaviour
+        run: node --test test/*.test.mjs
+
+      # An async Stop hook is silently skipped in non-interactive runs, so the
+      # session is never captured when an agent is scripted. Found the hard way.
+      - name: Capture is not async
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          stop = json.load(open('hooks/hooks.json'))['hooks']['Stop'][0]['hooks'][0]
+          if stop.get('async'):
+              print('::error::an async Stop hook never runs under `claude -p`'); sys.exit(1)
+          PY
+
+      # A root plugin.json routes the plugin through the Agent Plugins loader,
+      # which has no hook support, so every hook dies with nothing logged.
+      # https://github.com/openai/codex/issues/39895
+      - name: Codex ships no root manifest while it ships hooks
+        run: |
+          if [ -f plugins/codex/plugin.json ] && [ -f plugins/codex/hooks/hooks.json ]; then
+            echo "::error::plugins/codex/plugin.json silently disables the plugin's hooks"; exit 1
+          fi
+          python3 - <<'PY'
+          import json, sys
+          m = json.load(open('plugins/codex/.codex-plugin/plugin.json'))
+          missing = [k for k in ('hooks', 'mcpServers') if k not in m]
+          if missing:
+              print('::error::.codex-plugin/plugin.json must declare ' + ', '.join(missing)
+                    + ' — Codex reads neither by convention from this loader'); sys.exit(1)
+          PY
 
       # An unset ${VAR} reaches the server as the literal string, so a server
       # that only checks for presence starts with a bogus key and fails every

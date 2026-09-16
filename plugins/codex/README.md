@@ -7,6 +7,10 @@ codex plugin marketplace add GitLoomHQ/gitloom-plugins
 codex plugin add gitloom@gitloom
 ```
 
+Codex asks you to trust a plugin's hooks before it runs them. Review and trust
+them with `/hooks` inside Codex; until you do, the memory tools work but nothing
+runs automatically.
+
 Export a key — the same variable the GitLoom SDKs and CLI read — in the shell
 you launch Codex from:
 
@@ -29,6 +33,35 @@ Four skills — `setup`, `save-session`, `teach`, `deep-recall` — for the thin
 those tools do not cover: conversation-level ingestion, the vocabulary and
 skills APIs, and retrieval with a date window, a relevance floor or a
 model-written answer.
+
+## What runs automatically
+
+The tools above are there when the model reaches for them. These four hooks mean
+it usually does not have to.
+
+| hook | when | what it does |
+|---|---|---|
+| recall | you send a message | retrieves what bears on it and puts it in context |
+| capture | the turn ends | hands the new turns to ingestion |
+| approve | a memory tool is called | lets read-only ones run without a prompt |
+| session-start | a session opens | names the namespace in use |
+
+Recall is the one that changes how this feels. It searches with your message
+itself rather than waiting for the model to spend a tool call, so memory
+participates in every substantive message. It skips anything under twelve
+characters or starting `/`, `!`, `#`; drops a memory matched only through the
+relation graph, because that is context rather than evidence; and never injects
+a memory twice in one session. Four-second cap, and a failure means no memory
+this time rather than an error you have to deal with.
+
+Capture sends the turns, not a summary — GitLoom's ingestion does its own
+extraction and reconciliation, so the conversation is the shape it wants. It
+sends only what is new since the last turn it captured.
+
+Anything you wrap in `<private>…</private>` is removed before anything is sent.
+
+To turn any of them off, remove its entry from `hooks/hooks.json` in the
+installed plugin, or disable the plugin.
 
 ## Checking the install
 

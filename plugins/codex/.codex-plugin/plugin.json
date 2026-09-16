@@ -1,7 +1,6 @@
 {
-  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "gitloom",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Long-term memory backed by a real git repository. Recalls what it learned about you in earlier sessions, saves durable facts as they come up, and follows procedures you have taught it.",
   "author": {
     "name": "GitLoom",
@@ -41,5 +40,7 @@
         "logo": "./assets/logo.png"
       }
     }
-  }
+  },
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": "./mcp.json"
 }

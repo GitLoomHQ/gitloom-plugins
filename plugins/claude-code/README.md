@@ -34,6 +34,35 @@ Four skills for the things those tools do not cover:
 Skills are also model-invoked: Claude reaches for them when a task matches,
 without you naming them.
 
+## What runs automatically
+
+The tools above are there when the model reaches for them. These four hooks mean
+it usually does not have to.
+
+| hook | when | what it does |
+|---|---|---|
+| recall | you send a message | retrieves what bears on it and puts it in context |
+| capture | the turn ends | hands the new turns to ingestion |
+| approve | a memory tool is called | lets read-only ones run without a prompt |
+| session-start | a session opens | names the namespace in use |
+
+Recall is the one that changes how this feels. It searches with your message
+itself rather than waiting for the model to spend a tool call, so memory
+participates in every substantive message. It skips anything under twelve
+characters or starting `/`, `!`, `#`; drops a memory matched only through the
+relation graph, because that is context rather than evidence; and never injects
+a memory twice in one session. Four-second cap, and a failure means no memory
+this time rather than an error you have to deal with.
+
+Capture sends the turns, not a summary — GitLoom's ingestion does its own
+extraction and reconciliation, so the conversation is the shape it wants. It
+sends only what is new since the last turn it captured.
+
+Anything you wrap in `<private>…</private>` is removed before anything is sent.
+
+To turn any of them off, remove its entry from `hooks/hooks.json` in the
+installed plugin, or disable the plugin.
+
 ## If no tools appear
 
 With `GITLOOM_API_KEY` unset the server refuses to start, so you get the four

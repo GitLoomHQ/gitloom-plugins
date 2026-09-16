@@ -10,7 +10,7 @@ history and what changed it.
 | Codex / ChatGPT | [`plugins/codex`](plugins/codex) | `codex plugin marketplace add GitLoomHQ/gitloom-plugins` then `codex plugin add gitloom@gitloom` |
 
 Both wrap the same hosted MCP server, [`@gitloomhq/mcp`](https://www.npmjs.com/package/@gitloomhq/mcp),
-and carry the same four skills.
+and carry the same four skills and four hooks.
 
 ## What you get
 
@@ -31,6 +31,27 @@ And four skills, each for something the tools deliberately do not cover:
   than reinvented
 - **`deep-recall`** — retrieval with a date window, a relevance floor, or a
   model-written answer, for when a plain recall was not enough
+
+## What runs automatically
+
+Tools are there when the model reaches for them; the hooks mean it usually does
+not have to.
+
+- **recall** retrieves what bears on your message and puts it in context, before
+  the model answers. It searches with the message itself rather than waiting for
+  a tool call, drops a memory matched only through the relation graph because
+  that is context rather than evidence, and never injects the same memory twice
+  in a session.
+- **capture** hands the new turns to ingestion when the turn ends. Turns, not a
+  summary — GitLoom extracts and reconciles server-side.
+- **approve** lets `recall_memory` and `find_skill` run without a permission
+  prompt. `save_memory` still asks.
+- **session-start** names the namespace in use, because a memory scoped to the
+  wrong namespace looks exactly like one that holds nothing.
+
+Anything wrapped in `<private>…</private>` is removed before anything is sent.
+Every hook is bounded and fails open: a slow or dead network means no memory
+this time, never a blocked session.
 
 ## Configuration
 
@@ -64,13 +85,14 @@ or would rather not install a CLI.
 
 ## Developing
 
-`skills/` is the source. Both harnesses read the same `skills/<name>/SKILL.md`
-layout but cannot share a directory, because every path in a plugin manifest
-must stay under its own plugin root — so each plugin gets a copy:
+`skills/` and `hooks/` are the source. Both harnesses read the same layouts but
+cannot share a directory, because every path in a plugin manifest must stay
+under its own plugin root — so each plugin gets a copy:
 
 ```bash
-scripts/sync-skills.sh            # copy skills/ into both plugins
+scripts/sync-skills.sh            # copy skills/ and hooks/ into both plugins
 scripts/sync-skills.sh --check    # what CI runs
+node --test test/*.test.mjs       # hook behaviour against a fake API
 claude plugin validate ./plugins/claude-code --strict
 claude --plugin-dir ./plugins/claude-code
 ```
@@ -83,7 +105,7 @@ codex plugin add gitloom@gitloom
 codex mcp list                    # the plugin's server should appear, enabled
 ```
 
-### Two things the harnesses do not share
+### Four things the harnesses do not share
 
 - **Claude Code substitutes `${VAR}` in `.mcp.json`, but an *unset* variable
   passes through as the literal `${VAR}`** rather than as empty. A server that
@@ -94,6 +116,18 @@ codex mcp list                    # the plugin's server should appear, enabled
   `${PLUGIN_ROOT}/server.sh` is silently omitted from the plugin — no error, the
   server simply never appears in `codex mcp list`. Interpolation that works in
   `command` for Claude Code does not work there.
+- **A root `plugin.json` silently disables every hook in a Codex plugin.** It
+  routes the plugin through the Agent Plugins loader, which has no hook support;
+  nothing is logged and `codex plugin list` looks healthy
+  ([openai/codex#39895](https://github.com/openai/codex/issues/39895)). The
+  Codex plugin therefore declares `hooks` and `mcpServers` in
+  `.codex-plugin/plugin.json` and ships no root manifest. CI gates this.
+- **An `async` Stop hook never runs under `claude -p`.** The process exits before
+  the background hook is scheduled, so a scripted session is silently never
+  captured. Capture runs synchronously with a short timeout instead. CI gates
+  this too.
+- Claude Code sends the prompt as `user_prompt`; Codex sends `prompt`. Reading
+  one disables recall on the other harness with no error.
 
 ## Licence
 

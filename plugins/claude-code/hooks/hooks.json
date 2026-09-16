@@ -1,0 +1,54 @@
+{
+  "description": "GitLoom: SessionStart names the namespace, UserPromptSubmit injects memories that bear on the prompt, PreToolUse lets read-only memory tools run without a permission prompt, and Stop hands the new turns to ingestion.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.js\"",
+            "timeout": 10,
+            "statusMessage": "Connecting memory"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/recall.js\"",
+            "timeout": 10,
+            "additionalContextLimit": 2000,
+            "statusMessage": "Recalling"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "mcp__.*gitloom.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/approve.js\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/capture.js\"",
+            "timeout": 15,
+            "statusMessage": "Saving to memory"
+          }
+        ]
+      }
+    ]
+  }
+}
