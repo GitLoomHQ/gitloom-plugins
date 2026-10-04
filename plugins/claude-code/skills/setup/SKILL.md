@@ -34,8 +34,10 @@ curl -fsS "${GITLOOM_BASE_URL:-https://api.gitloom.cloud}/v1/whoami" \
   -H "Authorization: Bearer $GITLOOM_API_KEY"
 ```
 
-A `401` means the key is wrong or revoked. A `200` reports the account and
-whether the key is `live` or `test`.
+A `403` means the key is wrong or revoked; the memory tools report the same as
+an `(unauthorized)` failure. An unset or blank key stops the MCP server from
+starting at all. A `200` reports the account and whether the key is `live` or
+`test`.
 
 ## 3. Does the namespace exist?
 
