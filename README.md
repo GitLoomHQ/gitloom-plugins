@@ -135,6 +135,10 @@ codex mcp list                    # the plugin's server should appear, enabled
   this too.
 - Claude Code sends the prompt as `user_prompt`; Codex sends `prompt`. Reading
   one disables recall on the other harness with no error.
+- **Codex's `transcript_path` is a rollout, not a Claude Code transcript.** Its
+  turns are `response_item` messages with no id, and AGENTS.md and the
+  environment arrive as user messages. A parser for one format reads nothing
+  from the other, so capture on Codex silently sent nothing until it read both.
 
 ## Licence
 

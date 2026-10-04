@@ -216,6 +216,63 @@ test('a zone the API cannot read does not cost the session', async () => {
   })
 })
 
+const ROLLOUT = new URL('./fixtures/codex-rollout.jsonl', import.meta.url).pathname
+const rollout = readFileSync(ROLLOUT, 'utf8').trimEnd().split('\n')
+const CODEX_TURNS = [
+  ['user', 'I always indent with tabs, never spaces. Our releases go out on Thursdays.'],
+  ['assistant', 'Noted: tabs over spaces, and releases go out on Thursdays.'],
+  ['user', 'The staging database is called birch. Please remember that.'],
+  ['assistant', 'Understood, the staging database is called birch.'],
+]
+
+test('a Codex rollout yields the conversation and nothing Codex injected', async () => {
+  const { parse } = await import(new URL('../hooks/lib/transcript.js', import.meta.url))
+  const turns = parse(ROLLOUT)
+  assert.deepEqual(turns.map((t) => [t.role, t.content]), CODEX_TURNS)
+  const all = JSON.stringify(turns)
+  for (const injected of ['AGENTS.md', 'British English', 'environment_context', 'skills_instructions', 'permissions instructions', 'gitloom-recall', 'Neovim']) {
+    assert.ok(!all.includes(injected), `${injected} is not the user's words`)
+  }
+})
+
+test('only a whole tagged block counts as injected, never a user who types a tag', async () => {
+  const { parse } = await import(new URL('../hooks/lib/transcript.js', import.meta.url))
+  const file = join(work, 'codex-tags.jsonl')
+  const msg = (role, ...texts) => ({
+    timestamp: '2026-10-04T12:00:00.000Z',
+    type: 'response_item',
+    payload: { type: 'message', role, content: texts.map((text) => ({ type: role === 'assistant' ? 'output_text' : 'input_text', text })) },
+  })
+  writeFileSync(file, [
+    msg('user', '<user_shell_command>\n<command>ls</command>\n<result>a.txt</result>\n</user_shell_command>'),
+    msg('user', '<turn_aborted>\nThe user interrupted.\n</turn_aborted>'),
+    msg('user', '<environment_context>\n  <cwd>/x</cwd>\n</environment_context>', 'Why is a <div> wrong inside a <p>?'),
+    msg('user', '<b>bold</b> is deprecated, right?'),
+    msg('assistant', '<proposed_plan>\nUse a span.\n</proposed_plan>'),
+  ].map((o) => JSON.stringify(o)).join('\n'))
+  const turns = parse(file)
+  assert.deepEqual(turns.map((t) => t.content), ['Why is a <div> wrong inside a <p>?', '<b>bold</b> is deprecated, right?', '<proposed_plan>\nUse a span.\n</proposed_plan>'])
+  assert.equal(new Set(turns.map((t) => t.uuid)).size, turns.length, 'lines sharing a timestamp still need distinct markers')
+})
+
+test('Codex capture sends each turn exactly once across captures', async () => {
+  const transcript = join(work, 'codex.jsonl')
+  const firstTurn = rollout.findIndex((l) => JSON.parse(l).payload?.type === 'task_complete') + 1
+  const input = { session_id: 'codex', turn_id: 't', transcript_path: transcript, cwd: work, hook_event_name: 'Stop', stop_hook_active: false }
+  await withServer(() => ({ id: 'm' }), async (baseUrl, calls) => {
+    const env = { GITLOOM_API_KEY: 'k', GITLOOM_BASE_URL: baseUrl }
+    writeFileSync(transcript, rollout.slice(0, firstTurn).join('\n') + '\n')
+    await run('capture.js', input, env)
+    writeFileSync(transcript, rollout.join('\n') + '\n') // the resumed turn is appended
+    await run('capture.js', input, env)
+    await run('capture.js', input, env)
+    const sent = calls.filter((c) => c.path === '/v1/memories').map((c) => c.body)
+    assert.equal(sent.length, 2, 'a capture with nothing new sends nothing')
+    assert.deepEqual(sent.map((b) => b.messages.map((m) => [m.role, m.content])), [CODEX_TURNS.slice(0, 2), CODEX_TURNS.slice(2)])
+    assert.equal(sent[0].occurred_at, Math.floor(Date.parse('2026-10-04T11:59:06.506Z') / 1000))
+  })
+})
+
 test('capture sends nothing when there is nothing new', async () => {
   const transcript = join(work, 't2.jsonl')
   writeFileSync(transcript, JSON.stringify({ type: 'user', uuid: 'x1', timestamp: '2026-09-14T10:00:00Z', message: { role: 'user', content: [{ type: 'text', text: 'hello there friend' }] } }))
