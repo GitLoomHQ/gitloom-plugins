@@ -1,7 +1,7 @@
 {
   "gitloom": {
     "command": "npx",
-    "args": ["-y", "@gitloomhq/mcp@0.2.0"],
+    "args": ["-y", "@gitloomhq/mcp@0.3.0"],
     "env": {
       "GITLOOM_API_KEY": "${GITLOOM_API_KEY:-}",
       "GITLOOM_NAMESPACE": "${GITLOOM_NAMESPACE:-}",
