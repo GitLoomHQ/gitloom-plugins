@@ -35,8 +35,13 @@ already summarized gives it less to work with, not more.
 
 ## Sending it
 
-`date` is when the conversation *happened*, not now — it dates the memories, so
-getting it wrong misfiles them in time. `session_id` is your own id for the
+`occurred_at` is when the conversation *happened*, not now — it dates the
+memories, so getting it wrong misfiles them in time. It takes a date
+(`"2026-09-16"`), RFC 3339 with an offset, epoch seconds as a number, or a
+datetime without an offset, read in `timezone` (an IANA zone). `date` is its
+deprecated old name. `tags` go on every memory drawn from the conversation: at
+most 32, each up to 64 characters of letters, digits, spaces and
+`- _ . : / # @`, lowercased on arrival. `session_id` is your own id for the
 exchange; identical bodies within five minutes are deduplicated, so a retry is
 safe.
 
@@ -48,7 +53,9 @@ curl -fsS -X POST "${GITLOOM_BASE_URL:-https://api.gitloom.cloud}/v1/memories" \
 {
   "namespace": "default",
   "session_id": "chat-2026-09-16-a",
-  "date": "2026-09-16",
+  "occurred_at": "2026-09-16T18:40:00",
+  "timezone": "Asia/Kolkata",
+  "tags": ["purchase", "camera-gear"],
   "messages": [
     {"role": "user", "content": "I finally bought the Sony A7III today — 142k at Fotocentre in Bengaluru."},
     {"role": "assistant", "content": "Nice pick, that pairs well with your 28-70."}
@@ -64,6 +71,10 @@ Substitute `GITLOOM_NAMESPACE` for `"default"` if it is set.
 `202` and a queue message id. The memory does not exist yet and the id is not a
 memory id — no endpoint accepts it back. Tell the user their conversation was
 accepted, not that it was saved, and that a recall will find it shortly.
+
+A tag, time or zone the API cannot read is refused with `400` and
+`invalid_tag`, `invalid_date` or `invalid_timezone` before anything is queued;
+the `message` names the field. Fix it and send again.
 
 The request is bounded at 200 turns, 200,000 characters and 256 KB. Past any of
 those it is refused with `413 too_many_turns`, `413 session_too_long` or

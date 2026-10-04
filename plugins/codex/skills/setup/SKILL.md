@@ -64,7 +64,8 @@ look for it:
 ```bash
 curl -fsS -X POST "${GITLOOM_BASE_URL:-https://api.gitloom.cloud}/v1/memories" \
   -H "Authorization: Bearer $GITLOOM_API_KEY" -H "content-type: application/json" \
-  -d "{\"namespace\":\"${GITLOOM_NAMESPACE:-default}\",\"session_id\":\"gitloom-plugin-setup\",\"messages\":[
+  -d "{\"namespace\":\"${GITLOOM_NAMESPACE:-default}\",\"session_id\":\"gitloom-plugin-setup\",
+    \"occurred_at\":\"$(date +%F)\",\"tags\":[\"gitloom-setup\"],\"messages\":[
     {\"role\":\"user\",\"content\":\"Remember that I am testing the GitLoom plugin setup.\"},
     {\"role\":\"assistant\",\"content\":\"Noted.\"}]}"
 ```
