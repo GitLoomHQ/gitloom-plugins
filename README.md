@@ -53,6 +53,13 @@ Anything wrapped in `<private>…</private>` is removed before anything is sent.
 Every hook is bounded and fails open: a slow or dead network means no memory
 this time, never a blocked session.
 
+What each session has already sent and injected lives in
+`$XDG_STATE_HOME/gitloom/sessions`, else `~/.local/state/gitloom/sessions`
+(`~/Library/Application Support/gitloom/sessions` on macOS,
+`%LOCALAPPDATA%\gitloom\sessions` on Windows), or wherever `GITLOOM_STATE_DIR`
+points. Earlier versions kept it in `~/.gitloom/sessions`; the first hook that
+needs it moves it across, and removes `~/.gitloom` only if that leaves it empty.
+
 ## Configuration
 
 One environment variable, the same one the SDKs and the `gitloom` CLI read:

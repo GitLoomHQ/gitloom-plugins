@@ -3,15 +3,41 @@
 // session.
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import fs, { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
 const HOOKS = new URL('../hooks/', import.meta.url).pathname
 const work = mkdtempSync(join(tmpdir(), 'gitloom-hooks-'))
 process.on('exit', () => rmSync(work, { recursive: true, force: true }))
+
+const { defaultStateRoot, migrateLegacyState, hash } = await import(new URL('../hooks/lib/io.js', import.meta.url))
+
+// A hook run from a test must never see the real home directory, nor a git
+// repository above the scratch directory.
+function envFor(env) {
+  const home = join(work, 'home')
+  mkdirSync(home, { recursive: true })
+  return {
+    ...process.env,
+    HOME: home,
+    XDG_STATE_HOME: undefined,
+    LOCALAPPDATA: undefined,
+    GIT_CEILING_DIRECTORIES: dirname(work),
+    GITLOOM_NAMESPACE: 'ns',
+    GITLOOM_STATE_DIR: join(work, 'state'),
+    ...env,
+  }
+}
+
+function writeJsonFile(file, value) {
+  mkdirSync(dirname(file), { recursive: true })
+  writeFileSync(file, JSON.stringify(value))
+}
+
+const readJsonFile = (file) => JSON.parse(readFileSync(file, 'utf8'))
 
 /** A fake API that records what it was asked for. */
 async function withServer(handler, fn) {
@@ -35,10 +61,7 @@ async function withServer(handler, fn) {
 
 function run(hook, input, env = {}) {
   return new Promise((resolve) => {
-    const p = spawn('node', [join(HOOKS, hook)], {
-      env: { ...process.env, GITLOOM_NAMESPACE: 'ns', GITLOOM_STATE_DIR: join(work, 'state'), ...env },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    })
+    const p = spawn('node', [join(HOOKS, hook)], { env: envFor(env), stdio: ['pipe', 'pipe', 'pipe'] })
     let out = ''
     p.stdout.on('data', (d) => (out += d))
     p.on('exit', (code) => {
@@ -178,7 +201,7 @@ test('every hook exits clean with no key, bad input, or a dead API', async () =>
     assert.equal(dead.code, 0, `${hook} must exit 0 when the API is unreachable`)
 
     const garbage = await new Promise((resolve) => {
-      const p = spawn('node', [join(HOOKS, hook)], { env: { ...process.env, GITLOOM_API_KEY: 'k' }, stdio: ['pipe', 'pipe', 'pipe'] })
+      const p = spawn('node', [join(HOOKS, hook)], { env: envFor({ GITLOOM_API_KEY: 'k' }), stdio: ['pipe', 'pipe', 'pipe'] })
       let out = ''
       p.stdout.on('data', (d) => (out += d))
       p.on('exit', (code) => resolve({ code, out }))
@@ -200,4 +223,110 @@ test('a namespace is derived from the git remote, not the checkout path', async 
   assert.equal(ids.size, 1, 'every spelling of one remote must agree')
   assert.notEqual(sha(normalizeRemote('git@github.com:other/gitloom.git')), [...ids][0], 'same name, different repo must not collide')
   assert.match(`repo-${slug('gitloom')}-${[...ids][0]}`, /^[a-z0-9-]{1,64}$/, 'must satisfy the namespace charset')
+})
+
+const MIGRATED = [
+  { type: 'user', uuid: 'u1', timestamp: '2026-09-14T10:00:00Z', message: { role: 'user', content: 'I bought a camera.' } },
+  { type: 'assistant', uuid: 'a1', timestamp: '2026-09-14T10:00:01Z', message: { role: 'assistant', content: 'Nice.' } },
+  { type: 'user', uuid: 'u2', timestamp: '2026-09-15T10:00:00Z', message: { role: 'user', content: 'And a 35mm lens.' } },
+  { type: 'assistant', uuid: 'a2', timestamp: '2026-09-15T10:00:01Z', message: { role: 'assistant', content: 'Good call.' } },
+]
+
+/** A capture against a home whose old state already saw the first exchange. */
+async function captureAfterUpgrade(session, env) {
+  const transcript = join(work, `${session}.jsonl`)
+  writeFileSync(transcript, MIGRATED.map((o) => JSON.stringify(o)).join('\n'))
+  return withServer(() => ({ id: 'm' }), async (baseUrl, calls) => {
+    const r = await run('capture.js', { session_id: session, cwd: work, transcript_path: transcript }, { GITLOOM_API_KEY: 'k', GITLOOM_BASE_URL: baseUrl, ...env })
+    const sent = calls.find((c) => c.path === '/v1/memories')?.body
+    return { ...r, sent: sent?.messages.map((m) => m.content) }
+  })
+}
+
+function legacyHome(session, extra = {}) {
+  const home = mkdtempSync(join(work, 'home-'))
+  writeJsonFile(join(home, '.gitloom', 'sessions', session, 'captured.json'), { uuid: 'a1' })
+  for (const [name, body] of Object.entries(extra)) writeFileSync(join(home, '.gitloom', name), body)
+  return home
+}
+
+test('state lives in the platform state directory, never under ~/.gitloom', async () => {
+  const cases = [
+    [{}, 'linux', '/home/u', '/home/u/.local/state/gitloom/sessions'],
+    [{ XDG_STATE_HOME: '/xdg' }, 'linux', '/home/u', '/xdg/gitloom/sessions'],
+    [{ XDG_STATE_HOME: 'relative' }, 'linux', '/home/u', '/home/u/.local/state/gitloom/sessions'],
+    [{}, 'darwin', '/Users/u', '/Users/u/Library/Application Support/gitloom/sessions'],
+    [{ XDG_STATE_HOME: '/xdg' }, 'darwin', '/Users/u', '/xdg/gitloom/sessions'],
+    [{ LOCALAPPDATA: 'D:\\Local' }, 'win32', 'C:\\Users\\u', 'D:\\Local\\gitloom\\sessions'],
+    [{}, 'win32', 'C:\\Users\\u', 'C:\\Users\\u\\AppData\\Local\\gitloom\\sessions'],
+  ]
+  for (const [env, platform, home, want] of cases) {
+    assert.equal(defaultStateRoot(env, platform, home), want, `${platform} ${JSON.stringify(env)}`)
+  }
+
+  const home = mkdtempSync(join(work, 'home-'))
+  const r = await captureAfterUpgrade('fresh', { HOME: home, GITLOOM_STATE_DIR: undefined })
+  assert.equal(r.sent.length, 4)
+  assert.ok(existsSync(join(defaultStateRoot({}, process.platform, home), 'fresh', 'captured.json')))
+  assert.equal(existsSync(join(home, '.gitloom')), false, 'a fresh install must not create ~/.gitloom')
+})
+
+test('old state moves out of ~/.gitloom, so a session is not captured twice', async () => {
+  const home = legacyHome('mig')
+  const r = await captureAfterUpgrade('mig', { HOME: home, GITLOOM_STATE_DIR: undefined })
+  assert.deepEqual(r.sent, ['And a 35mm lens.', 'Good call.'], 'the capture offset must survive the move')
+  assert.equal(readJsonFile(join(defaultStateRoot({}, process.platform, home), 'mig', 'captured.json')).uuid, 'a2')
+  assert.equal(existsSync(join(home, '.gitloom')), false, 'an emptied ~/.gitloom goes too')
+})
+
+test('a ~/.gitloom holding anything else is left in place', async () => {
+  const home = legacyHome('keep', { 'notes.md': 'not the plugin\'s' })
+  const memory = { path: 'facts/a.md', content: 'Bought a Sony A7III.' }
+  writeJsonFile(join(home, '.gitloom', 'sessions', 'keep', 'recalled.json'), [hash(memory.path + memory.content)])
+  await withServer(() => ({ memories: [{ ...memory, matched: ['lexical'] }] }), async (baseUrl) => {
+    const r = await run('recall.js', { session_id: 'keep', cwd: work, user_prompt: 'what camera did I buy' }, { HOME: home, GITLOOM_STATE_DIR: undefined, GITLOOM_API_KEY: 'k', GITLOOM_BASE_URL: baseUrl })
+    assert.equal(r.json.hookSpecificOutput, undefined, 'what was injected before the move stays injected')
+  })
+  assert.equal(readFileSync(join(home, '.gitloom', 'notes.md'), 'utf8'), "not the plugin's")
+  assert.equal(existsSync(join(home, '.gitloom', 'sessions')), false)
+  assert.ok(existsSync(join(defaultStateRoot({}, process.platform, home), 'keep', 'recalled.json')))
+})
+
+test('GITLOOM_STATE_DIR leaves ~/.gitloom alone', async () => {
+  const home = legacyHome('pinned')
+  const dir = join(work, 'pinned-state')
+  const r = await captureAfterUpgrade('pinned', { HOME: home, GITLOOM_STATE_DIR: dir })
+  assert.equal(r.sent.length, 4, 'an explicit state dir starts from what it holds')
+  assert.equal(readJsonFile(join(home, '.gitloom', 'sessions', 'pinned', 'captured.json')).uuid, 'a1')
+  assert.equal(readJsonFile(join(dir, 'pinned', 'captured.json')).uuid, 'a2')
+  assert.equal(existsSync(defaultStateRoot({}, process.platform, home)), false)
+})
+
+test('a move that fails keeps using the old state and still answers', async () => {
+  const home = legacyHome('stuck')
+  const notADir = join(home, 'file')
+  writeFileSync(notADir, '')
+  const r = await captureAfterUpgrade('stuck', { HOME: home, GITLOOM_STATE_DIR: undefined, XDG_STATE_HOME: notADir })
+  assert.equal(r.code, 0)
+  assert.deepEqual(r.sent, ['And a 35mm lens.', 'Good call.'])
+  assert.equal(readJsonFile(join(home, '.gitloom', 'sessions', 'stuck', 'captured.json')).uuid, 'a2')
+})
+
+test('across devices the old state is copied, then removed', () => {
+  const home = legacyHome('xdev')
+  const root = join(home, 'state', 'gitloom', 'sessions')
+  const from = join(home, '.gitloom', 'sessions')
+  const rename = fs.renameSync
+  fs.renameSync = (a, b) => {
+    if (a === from) throw Object.assign(new Error('cross-device link'), { code: 'EXDEV' })
+    return rename(a, b)
+  }
+  try {
+    migrateLegacyState(home, root)
+  } finally {
+    fs.renameSync = rename
+  }
+  assert.equal(readJsonFile(join(root, 'xdev', 'captured.json')).uuid, 'a1')
+  assert.deepEqual(readdirSync(dirname(root)), ['sessions'], 'no half-copied directory is left behind')
+  assert.equal(existsSync(join(home, '.gitloom')), false)
 })
