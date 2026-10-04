@@ -12,7 +12,7 @@
       "source": "./plugins/claude-code",
       "displayName": "GitLoom",
       "description": "Long-term memory backed by a real git repository. Recalls what bears on each message before the model answers, saves the session when it ends, and follows procedures you have taught it.",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "author": {
         "name": "GitLoom",
         "url": "https://gitloom.cloud"
