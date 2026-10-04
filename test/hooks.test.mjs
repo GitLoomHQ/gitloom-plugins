@@ -46,9 +46,10 @@ async function withServer(handler, fn) {
     let body = ''
     req.on('data', (d) => (body += d))
     req.on('end', () => {
-      calls.push({ method: req.method, path: req.url.split('?')[0], url: req.url, body: body ? JSON.parse(body) : null })
+      const call = { method: req.method, path: req.url.split('?')[0], url: req.url, body: body ? JSON.parse(body) : null }
+      calls.push(call)
       res.setHeader('content-type', 'application/json')
-      res.end(JSON.stringify(handler(req) ?? {}))
+      res.end(JSON.stringify(handler(req, res, call) ?? {}))
     })
   })
   await new Promise((r) => srv.listen(0, '127.0.0.1', r))
@@ -121,6 +122,26 @@ test('a memory already injected this session is not injected again', async () =>
   })
 })
 
+test('recall dates a memory by when it happened, never by when it was written', async () => {
+  const written = { created_at: Date.parse('2026-10-01T09:00:00Z') / 1000, updated_at: Date.parse('2026-10-03T09:00:00Z') / 1000 }
+  const res = {
+    namespace: 'ns',
+    memories: [
+      { path: 'facts/a.md', title: 'Camera', content: 'Bought a Sony A7III.', occurred_at: Date.UTC(2026, 7, 14, 12) / 1000, occurred_precision: 'day', ...written, matched: ['lexical'] },
+      { path: 'facts/b.md', content: 'Ordered a 35mm lens.', occurred_at: Date.parse('2026-08-15T03:30:00Z') / 1000, occurred_precision: 'instant', ...written, matched: ['cue'] },
+      { path: 'facts/c.md', content: 'Prefers prime lenses.', ...written, matched: ['body'] },
+    ],
+  }
+  await withServer(() => res, async (baseUrl) => {
+    const r = await run('recall.js', { session_id: 'dated', cwd: work, user_prompt: 'what camera did I buy' }, { GITLOOM_API_KEY: 'k', GITLOOM_BASE_URL: baseUrl, TZ: 'America/New_York' })
+    const ctx = r.json.hookSpecificOutput.additionalContext
+    assert.match(ctx, /^- \[2026-08-14\] Camera — Bought a Sony A7III\./m, 'a day is its stored date')
+    assert.match(ctx, /^- \[2026-08-15\] Ordered a 35mm lens\./m, 'an instant is its UTC date, whatever the local zone')
+    assert.match(ctx, /^- Prefers prime lenses\./m, 'no occurred_at means no date, not a stand-in')
+    assert.doesNotMatch(ctx, /2026-10-0[13]/, 'ingestion times are not when anything happened')
+  })
+})
+
 test('recall sends the score floor and drops graph neighbours server-side', async () => {
   await withServer(() => memories(), async (baseUrl, calls) => {
     await run('recall.js', { session_id: 'q', cwd: work, user_prompt: 'what camera did I buy' }, { GITLOOM_API_KEY: 'k', GITLOOM_BASE_URL: baseUrl })
@@ -149,14 +170,49 @@ test('capture sends turns, redacted, without thinking or tool mechanics', async 
   ].map((o) => JSON.stringify(o)).join('\n'))
 
   await withServer(() => ({ id: 'm', status: 'accepted' }), async (baseUrl, calls) => {
-    await run('capture.js', { session_id: 'cap', cwd: work, transcript_path: transcript }, { GITLOOM_API_KEY: 'k', GITLOOM_BASE_URL: baseUrl })
+    await run('capture.js', { session_id: 'cap', cwd: work, transcript_path: transcript }, { GITLOOM_API_KEY: 'k', GITLOOM_BASE_URL: baseUrl, TZ: 'Europe/Berlin' })
     const sent = calls.find((c) => c.path === '/v1/memories').body
     const all = JSON.stringify(sent)
     assert.equal(sent.messages.length, 2, 'tool-only and subagent turns must be dropped')
     assert.doesNotMatch(all, /secret/, '<private> must never leave the machine')
     assert.doesNotMatch(all, /internal/, 'thinking is not the conversation')
     assert.doesNotMatch(all, /subagent chatter/)
-    assert.equal(sent.date, '2026-09-14', 'dates the memory when it happened, not now')
+    assert.equal(sent.occurred_at, Date.parse('2026-09-14T10:00:00Z') / 1000, 'dates the memory when it happened, not now')
+    assert.equal(sent.date, undefined, 'date is the deprecated spelling of occurred_at')
+    assert.equal(sent.timezone, 'Europe/Berlin')
+    assert.ok(sent.tags.length > 0 && sent.tags.length <= 32)
+    for (const t of sent.tags) assert.match(t, /^[\p{Ll}\p{Lo}\p{N}\p{M} _.:\/#@-]{1,64}$/u, `${t} breaks the API's tag rules`)
+  })
+})
+
+test('a turn is dated as an instant when it has a time, else by its date', async () => {
+  const { occurredAt } = await import(new URL('../hooks/lib/transcript.js', import.meta.url))
+  const t = Date.parse('2026-09-14T10:00:00Z') / 1000
+  assert.equal(occurredAt('2026-09-14T10:00:00.123Z'), t)
+  assert.equal(occurredAt('2026-09-14T15:30:00+05:30'), t)
+  assert.equal(occurredAt('2026-09-14'), '2026-09-14')
+  assert.equal(occurredAt('2026-09-14Tnonsense'), '2026-09-14')
+  assert.equal(occurredAt(''), undefined)
+})
+
+test('a zone the API cannot read does not cost the session', async () => {
+  const transcript = join(work, 'tz.jsonl')
+  writeFileSync(transcript, [
+    { type: 'user', uuid: 'z1', timestamp: '2026-09-14T10:00:00Z', message: { role: 'user', content: 'I moved to Pune.' } },
+    { type: 'assistant', uuid: 'z2', timestamp: '2026-09-14T10:00:01Z', message: { role: 'assistant', content: 'Noted.' } },
+  ].map((o) => JSON.stringify(o)).join('\n'))
+  const refuseZones = (req, res, call) => {
+    if (!call.body?.timezone) return { id: 'm' }
+    res.statusCode = 400
+    return { error: { code: 'invalid_timezone', message: 'timezone: a timezone is an IANA name' } }
+  }
+  await withServer(refuseZones, async (baseUrl, calls) => {
+    const r = await run('capture.js', { session_id: 'tz', cwd: work, transcript_path: transcript }, { GITLOOM_API_KEY: 'k', GITLOOM_BASE_URL: baseUrl, TZ: 'Europe/Berlin' })
+    const writes = calls.filter((c) => c.path === '/v1/memories')
+    assert.equal(writes.length, 2)
+    assert.equal(writes[1].body.timezone, undefined)
+    assert.equal(writes[1].body.occurred_at, writes[0].body.occurred_at)
+    assert.match(r.json.systemMessage, /saved 2 turns/)
   })
 })
 

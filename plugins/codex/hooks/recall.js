@@ -18,16 +18,23 @@ function skip(prompt) {
   return prompt.length < MIN_PROMPT || ['/', '!', '#'].includes(prompt[0])
 }
 
+// When the memory's subject happened. created_at and updated_at are when
+// ingestion wrote it, and shown to the model they read as when it happened.
+function happened(m) {
+  const d = new Date(Number(m.occurred_at) * 1000)
+  return m.occurred_at && !Number.isNaN(d.getTime()) ? `[${d.toISOString().slice(0, 10)}] ` : ''
+}
+
 function render(memories) {
   const lines = memories.map((m) => {
     const body = String(m.content || m.snippet || '').replace(/\s+/g, ' ').slice(0, MAX_CHARS)
     const title = m.title && !body.startsWith(m.title) ? `${m.title} — ` : ''
-    return `- ${title}${body} (${m.path})`
+    return `- ${happened(m)}${title}${body} (${m.path})`
   })
   return `<gitloom-recall>
 What GitLoom already knows that bears on this message. Treat it as background
 from earlier sessions, not as something the user just said. If one of these
-shapes your answer, say where it came from.
+shapes your answer, say where it came from. A [date] is when it happened.
 
 ${lines.join('\n')}
 </gitloom-recall>`

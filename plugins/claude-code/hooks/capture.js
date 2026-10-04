@@ -6,6 +6,14 @@ const { remember } = require('./lib/api')
 const { readStdin, pass, write, MARK } = require('./lib/io')
 const { delta } = require('./lib/transcript')
 
+function localZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined
+  } catch {
+    return undefined
+  }
+}
+
 async function main() {
   const input = await readStdin()
   const cwd = input.cwd || process.cwd()
@@ -17,10 +25,17 @@ async function main() {
   const d = delta(input.transcript_path, input.session_id)
   if (!d) return pass()
 
-  await remember(cfg, d.messages, {
+  const opts = {
     sessionId: String(input.session_id),
-    date: d.date,
+    occurredAt: d.occurredAt,
+    timezone: localZone(),
     tags: ['session', cfg.project ? 'project' : 'personal'],
+  }
+  // The zone only places the session on the user's calendar. One this machine
+  // names but the API cannot read must not cost the session itself.
+  await remember(cfg, d.messages, opts).catch((err) => {
+    if (err.code !== 'invalid_timezone' || !opts.timezone) throw err
+    return remember(cfg, d.messages, { ...opts, timezone: undefined })
   })
   d.commit()
 

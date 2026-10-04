@@ -17,6 +17,17 @@ function textOf(content) {
     .trim()
 }
 
+/**
+ * When a turn happened: the instant in epoch seconds when its timestamp has a
+ * time, else the date it names. Never now, which would misfile a late capture.
+ */
+function occurredAt(timestamp) {
+  const s = String(timestamp || '')
+  const day = /^\d{4}-\d{2}-\d{2}/.exec(s)?.[0]
+  const ms = s.length > 10 ? Date.parse(s) : NaN
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : day
+}
+
 function parse(transcriptPath) {
   let raw
   try {
@@ -73,11 +84,11 @@ function delta(transcriptPath, sessionId) {
   return {
     messages: kept.map((t) => ({ role: t.role, content: redact(t.content) })),
     lastUuid: fresh[fresh.length - 1].uuid,
-    date: (kept[0].timestamp || '').slice(0, 10) || undefined,
+    occurredAt: occurredAt(kept[0].timestamp),
     commit() {
       if (marker) writeJson(marker, { uuid: this.lastUuid, at: new Date().toISOString() })
     },
   }
 }
 
-module.exports = { parse, delta, textOf, MAX_TURNS, MAX_CHARS }
+module.exports = { parse, delta, textOf, occurredAt, MAX_TURNS, MAX_CHARS }
