@@ -17,6 +17,36 @@ function textOf(content) {
     .trim()
 }
 
+// Codex records what it injects (AGENTS.md, the environment, shell output, a
+// skill) as user messages, each one whole tagged block. None is the user's words.
+const INJECTED = /^(?:# AGENTS\.md instructions for |<([a-z][\w -]*)>[\s\S]*<\/\1>$)/i
+
+function codexTurn(e, index) {
+  const p = e.payload
+  if (p?.type !== 'message' || (p.role !== 'user' && p.role !== 'assistant') || !Array.isArray(p.content)) return null
+  const text = p.content
+    .filter((c) => c && (c.type === 'input_text' || c.type === 'output_text') && typeof c.text === 'string')
+    .map((c) => c.text.trim())
+    .filter((t) => t && !(p.role === 'user' && INJECTED.test(t)))
+    .join('\n')
+  if (!text) return null
+  // A rollout line has no id. It is only ever appended to, so where a line sits
+  // is stable, and the timestamp guards against a different file.
+  const at = e.timestamp || ''
+  return { uuid: `${at}#${e.ordinal ?? index}`, role: p.role, content: text, timestamp: at }
+}
+
+/**
+ * When a turn happened: the instant in epoch seconds when its timestamp has a
+ * time, else the date it names. Never now, which would misfile a late capture.
+ */
+function occurredAt(timestamp) {
+  const s = String(timestamp || '')
+  const day = /^\d{4}-\d{2}-\d{2}/.exec(s)?.[0]
+  const ms = s.length > 10 ? Date.parse(s) : NaN
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : day
+}
+
 function parse(transcriptPath) {
   let raw
   try {
@@ -25,12 +55,19 @@ function parse(transcriptPath) {
     return []
   }
   const out = []
-  for (const line of raw.split('\n')) {
+  const lines = raw.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
     if (!line.trim()) continue
     let e
     try {
       e = JSON.parse(line)
     } catch {
+      continue
+    }
+    if (e.type === 'response_item') {
+      const turn = codexTurn(e, i)
+      if (turn) out.push(turn)
       continue
     }
     if (e.type !== 'user' && e.type !== 'assistant') continue
@@ -73,11 +110,11 @@ function delta(transcriptPath, sessionId) {
   return {
     messages: kept.map((t) => ({ role: t.role, content: redact(t.content) })),
     lastUuid: fresh[fresh.length - 1].uuid,
-    date: (kept[0].timestamp || '').slice(0, 10) || undefined,
+    occurredAt: occurredAt(kept[0].timestamp),
     commit() {
       if (marker) writeJson(marker, { uuid: this.lastUuid, at: new Date().toISOString() })
     },
   }
 }
 
-module.exports = { parse, delta, textOf, MAX_TURNS, MAX_CHARS }
+module.exports = { parse, delta, textOf, occurredAt, MAX_TURNS, MAX_CHARS }

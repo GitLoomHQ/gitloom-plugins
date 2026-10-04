@@ -17,6 +17,9 @@ async function request(cfg, method, path, body, timeoutMs = TIMEOUT_MS) {
   if (!res.ok) {
     const err = new Error(`gitloom ${res.status}: ${text.slice(0, 200)}`)
     err.status = res.status
+    try {
+      err.code = JSON.parse(text).error?.code
+    } catch {}
     throw err
   }
   return text ? JSON.parse(text) : {}
@@ -27,10 +30,11 @@ function retrieve(cfg, query, params = {}, timeoutMs) {
   return request(cfg, 'GET', `/v1/retrieve?${q}`, null, timeoutMs)
 }
 
-function remember(cfg, messages, { sessionId, date, tags } = {}) {
+function remember(cfg, messages, { sessionId, occurredAt, timezone, tags } = {}) {
   const body = { namespace: cfg.namespace, messages }
   if (sessionId) body.session_id = sessionId
-  if (date) body.date = date
+  if (occurredAt) body.occurred_at = occurredAt
+  if (timezone) body.timezone = timezone
   if (tags) body.tags = tags
   // Older deployments ignore an unknown field rather than rejecting it, so
   // sending author unconditionally is safe against an un-upgraded API.

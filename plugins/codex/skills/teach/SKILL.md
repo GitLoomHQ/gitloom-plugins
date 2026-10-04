@@ -32,9 +32,15 @@ curl -fsS -X POST "${GITLOOM_BASE_URL:-https://api.gitloom.cloud}/v1/vocab" \
 Reading them back, resolving one, and forgetting one:
 
 ```bash
-curl -fsS -G ".../v1/vocab" --data-urlencode "namespace=default"
-curl -fsS -G ".../v1/vocab" --data-urlencode "namespace=default" --data-urlencode "word=k8s"
-curl -fsS -X DELETE ".../v1/vocab?namespace=default&term=Northstar"
+curl -fsS -G "${GITLOOM_BASE_URL:-https://api.gitloom.cloud}/v1/vocab" \
+  -H "Authorization: Bearer $GITLOOM_API_KEY" \
+  --data-urlencode "namespace=${GITLOOM_NAMESPACE:-default}"
+curl -fsS -G "${GITLOOM_BASE_URL:-https://api.gitloom.cloud}/v1/vocab" \
+  -H "Authorization: Bearer $GITLOOM_API_KEY" \
+  --data-urlencode "namespace=${GITLOOM_NAMESPACE:-default}" --data-urlencode "word=k8s"
+curl -fsS -G -X DELETE "${GITLOOM_BASE_URL:-https://api.gitloom.cloud}/v1/vocab" \
+  -H "Authorization: Bearer $GITLOOM_API_KEY" \
+  --data-urlencode "namespace=${GITLOOM_NAMESPACE:-default}" --data-urlencode "term=Northstar"
 ```
 
 A lookup for an unknown word answers `{"found": false}` — that is not an error.

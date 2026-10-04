@@ -4,7 +4,7 @@
     "gitloom": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@gitloomhq/mcp@0.2.0"]
+      "args": ["-y", "@gitloomhq/mcp@0.3.0"]
     }
   }
 }

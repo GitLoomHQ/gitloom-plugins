@@ -53,6 +53,13 @@ Anything wrapped in `<private>…</private>` is removed before anything is sent.
 Every hook is bounded and fails open: a slow or dead network means no memory
 this time, never a blocked session.
 
+What each session has already sent and injected lives in
+`$XDG_STATE_HOME/gitloom/sessions`, else `~/.local/state/gitloom/sessions`
+(`~/Library/Application Support/gitloom/sessions` on macOS,
+`%LOCALAPPDATA%\gitloom\sessions` on Windows), or wherever `GITLOOM_STATE_DIR`
+points. Earlier versions kept it in `~/.gitloom/sessions`; the first hook that
+needs it moves it across, and removes `~/.gitloom` only if that leaves it empty.
+
 ## Configuration
 
 One environment variable, the same one the SDKs and the `gitloom` CLI read:
@@ -128,6 +135,10 @@ codex mcp list                    # the plugin's server should appear, enabled
   this too.
 - Claude Code sends the prompt as `user_prompt`; Codex sends `prompt`. Reading
   one disables recall on the other harness with no error.
+- **Codex's `transcript_path` is a rollout, not a Claude Code transcript.** Its
+  turns are `response_item` messages with no id, and AGENTS.md and the
+  environment arrive as user messages. A parser for one format reads nothing
+  from the other, so capture on Codex silently sent nothing until it read both.
 
 ## Licence
 

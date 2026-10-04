@@ -3,10 +3,72 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 
-// Overridable so a test run, or a sandbox with no writable home, does not
-// inherit another run's dedup state.
-const STATE_ROOT = process.env.GITLOOM_STATE_DIR || path.join(os.homedir(), '.gitloom', 'sessions')
 const MARK = '◆'
+
+/**
+ * The platform's state directory. Never ~/.gitloom: the GitLoom CLI looks for
+ * a .gitloom marker walking up from the cwd, so one in the home directory made
+ * every command under $HOME write into it.
+ */
+function defaultStateRoot(env = process.env, platform = process.platform, home = os.homedir()) {
+  const p = platform === 'win32' ? path.win32 : path.posix
+  const abs = (v) => (v && p.isAbsolute(v) ? v : '')
+  if (abs(env.XDG_STATE_HOME)) return p.join(env.XDG_STATE_HOME, 'gitloom', 'sessions')
+  if (platform === 'darwin') return p.join(home, 'Library', 'Application Support', 'gitloom', 'sessions')
+  if (platform === 'win32') return p.join(abs(env.LOCALAPPDATA) || p.join(home, 'AppData', 'Local'), 'gitloom', 'sessions')
+  return p.join(home, '.local', 'state', 'gitloom', 'sessions')
+}
+
+function moveDir(from, to) {
+  try {
+    fs.renameSync(from, to)
+    return
+  } catch (err) {
+    if (err.code !== 'EXDEV') throw err
+  }
+  const tmp = `${to}.${process.pid}.tmp`
+  try {
+    fs.cpSync(from, tmp, { recursive: true })
+    fs.renameSync(tmp, to)
+  } catch (err) {
+    fs.rmSync(tmp, { recursive: true, force: true })
+    throw err
+  }
+  fs.rmSync(from, { recursive: true, force: true })
+}
+
+/**
+ * State used to live in ~/.gitloom/sessions. It holds each session's capture
+ * offset, so leaving it behind would resend sessions already captured.
+ */
+function migrateLegacyState(home, root) {
+  const legacy = path.join(home, '.gitloom')
+  const from = path.join(legacy, 'sessions')
+  if (!fs.existsSync(from) || fs.existsSync(root)) return
+  fs.mkdirSync(path.dirname(root), { recursive: true })
+  moveDir(from, root)
+  try {
+    fs.rmdirSync(legacy) // only if empty: it may hold something that is not ours
+  } catch {}
+}
+
+let root
+function stateRoot() {
+  if (root) return root
+  // Overridable so a test run, or a sandbox with no writable home, does not
+  // inherit another run's dedup state.
+  if (process.env.GITLOOM_STATE_DIR) return (root = process.env.GITLOOM_STATE_DIR)
+  const home = os.homedir()
+  root = defaultStateRoot(process.env, process.platform, home)
+  try {
+    migrateLegacyState(home, root)
+  } catch {
+    // Until a move succeeds, the old directory still holds every offset.
+    const legacy = path.join(home, '.gitloom', 'sessions')
+    if (fs.existsSync(legacy)) root = legacy
+  }
+  return root
+}
 
 function readStdin() {
   return new Promise((resolve) => {
@@ -45,8 +107,8 @@ function promptOf(input) {
 
 function sessionDir(sessionId) {
   if (!sessionId) return null
-  const dir = path.join(STATE_ROOT, String(sessionId).replace(/[^\w.-]/g, '_'))
   try {
+    const dir = path.join(stateRoot(), String(sessionId).replace(/[^\w.-]/g, '_'))
     fs.mkdirSync(dir, { recursive: true })
     return dir
   } catch {
@@ -85,4 +147,17 @@ function redact(text) {
   return String(text).replace(/<private>[\s\S]*?<\/private>/gi, '[redacted]')
 }
 
-module.exports = { readStdin, write, pass, promptOf, sessionDir, readJson, writeJson, hash, redact, MARK }
+module.exports = {
+  readStdin,
+  write,
+  pass,
+  promptOf,
+  sessionDir,
+  defaultStateRoot,
+  migrateLegacyState,
+  readJson,
+  writeJson,
+  hash,
+  redact,
+  MARK,
+}
